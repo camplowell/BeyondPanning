@@ -13,10 +13,7 @@ const Delay = @This();
 const VDir = @Vector(filter_taps, f32);
 
 const filter_taps = 4;
-const max_shift = 64;
-const mirror_len = simd.len + filter_taps + max_shift;
-// const mirror_len = filter_taps - 1;
-
+const mirror_len = simd.len + filter_taps;
 
 data: []f32,
 i: usize,
@@ -40,7 +37,7 @@ pub fn deinit(self: *Delay, gpa: Allocator) void {
     self.* = undefined;
 }
 
-pub fn push(self: *Delay, values: []f32) void {
+pub fn push(self: *Delay, values: []const f32) void {
     std.debug.assert(values.len < self.capacity);
     const before_wrap = @min(values.len, self.capacity - self.i);
     const wrapped = before_wrap < values.len;
@@ -68,9 +65,10 @@ pub fn get(self: Delay, delay: anytype) @TypeOf(delay) {
 pub fn getVec(self: Delay, delay: Vec) Vec {
     @setFloatMode(.optimized);
     const aligned: Vec = delay + @as(Vec, @floatFromInt(std.simd.iota(u32, simd.len)));
-    const span = @abs(aligned[0] - aligned[simd.len - 1]);
-    const tap: [filter_taps]Vec = if (span <= 0.5) D: {
-        const reference: f32 = @floor((aligned[0] + aligned[simd.len - 1]) * 0.5);
+    const lowest = @min(aligned[0], aligned[simd.len - 1]);
+    const highest = @max(aligned[0], aligned[simd.len - 1]);
+    const tap: [filter_taps]Vec = if (highest - lowest <= 0.5) D: {
+        const reference: f32 = @floor(lowest);
         const base = (self.i -% filter_taps -% @as(usize, @intFromFloat(reference))) & self.mask;
         
         var tap: [filter_taps]Vec = undefined;
@@ -87,22 +85,34 @@ pub fn getVec(self: Delay, delay: Vec) Vec {
 
     const frac = delay - @floor(delay);
 
-    const tap_coefficients = [filter_taps][4]f32{
-        .{ 1.0 / 6.0, 0.0, -1.0 / 6.0, 0.0 },
-        .{ -0.5, 0.5, 1.0, 0.0 },
-        .{ 0.5, -1.0, -0.5, 1.0 },
-        .{ -1.0 / 6.0, 0.5, -1.0 / 3.0, 0.0 },
-    };
+    const sixth: Vec = @splat(1.0 / 6.0);
+    const half: Vec = @splat(0.5);
+    const third: Vec = @splat(1.0 / 3.0);
+    
+    const cubic = (tap[0] - tap[3]) * sixth + (tap[2] - tap[1]) * half;
+    const quadratic = half * (tap[1] + tap[3]) - tap[2];
+    const linear = (-third * tap[3] + (-half * tap[2] + (tap[1] - tap[0] * sixth)));
+    const constant = tap[2];
 
-    var result: Vec = @splat(0.0);
-    inline for (tap_coefficients, tap) |coefficients, tap_samples| {
-        var weight: Vec = @splat(coefficients[0]);
-        inline for (coefficients[1..]) |coefficient| {
-            weight = @mulAdd(Vec, weight, frac, @splat(coefficient));
-        }
-        result = @mulAdd(Vec, tap_samples, weight, result);
-    }
-    return result;
+    
+    return (((cubic * frac + quadratic) * frac + linear) * frac + constant);
+
+//     const tap_coefficients = [filter_taps][4]f32{
+//         .{ 1.0 / 6.0, 0.0, -1.0 / 6.0, 0.0 },
+//         .{ -0.5, 0.5, 1.0, 0.0 },
+//         .{ 0.5, -1.0, -0.5, 1.0 },
+//         .{ -1.0 / 6.0, 0.5, -1.0 / 3.0, 0.0 },
+//     };
+// 
+//     var result: Vec = @splat(0.0);
+//     inline for (tap_coefficients, tap) |coefficients, tap_samples| {
+//         var weight: Vec = @splat(coefficients[0]);
+//         inline for (coefficients[1..]) |coefficient| {
+//             weight = weight * frac + @as(Vec, @splat(coefficient));
+//         }
+//         result = tap_samples * weight + result;
+//     }
+//     return result;
 }
 
 /// Retrieve one element from the delay, relative to the most recently added value.
@@ -114,9 +124,9 @@ pub fn getOne(self: Delay, delay: f32) f32 {
     std.debug.assert(d_i + filter_taps < self.capacity);
     const x = self.loadVec(self.i -% d_i);
     const frac: VDir = @splat(delay - @floor(delay));
-    var weights: VDir = @mulAdd(VDir, frac, .{ 1.0/6.0, -0.5, 0.5, -1.0/6.0 }, .{ 0.0, 0.5, -1.0, 0.5 });
-    weights = @mulAdd(VDir, weights, frac, .{ -1.0/6.0, 1.0, -0.5, -1.0/3.0 });
-    weights = @mulAdd(VDir, weights, frac, .{ 0.0, 0.0, 1.0, 0.0 });
+    var weights: VDir = frac * VDir{ 1.0/6.0, -0.5, 0.5, -1.0/6.0 } + VDir{ 0.0, 0.5, -1.0, 0.5 };
+    weights = weights * frac + VDir{ -1.0/6.0, 1.0, -0.5, -1.0/3.0 };
+    weights = weights * frac + VDir{ 0.0, 0.0, 1.0, 0.0 };
     return @reduce(.Add, x * weights);
 }
 
@@ -128,28 +138,6 @@ fn loadVec(self: Delay, base_off: usize) [filter_taps]f32 {
     return self.data[start..][0..filter_taps].*;
 }
 
-/// getOne(0) returns the sample pushed this many samples before the newest.
-const causality_delay: f32 = 1;
-const tolerance = 1e-6; // -60db
-
-fn cubicSignal(index: f32) f32 {
-    const x = index * 0.1;
-    return 0.5 + 0.8 * x - 0.3 * x * x + 0.05 * x * x * x;
-}
-
-fn pushOne(delay_line: *Delay, value: f32) void {
-    var buffer = [1]f32{value};
-    delay_line.push(&buffer);
-}
-
-fn pushCubicSignal(delay_line: *Delay, count: usize) void {
-    for (0..count) |index| pushOne(delay_line, cubicSignal(@floatFromInt(index)));
-}
-
-fn expectedCubic(count: usize, delay: f32) f32 {
-    const newest: f32 = @floatFromInt(count - 1);
-    return cubicSignal(newest - delay - causality_delay);
-}
 
 test "integer delays return exact past samples" {
     var delay_line = try Delay.init(std.testing.allocator, 32);
@@ -177,7 +165,7 @@ test "reproduces cubic polynomial at fractional delays" {
 
     var delay: f32 = 0.0;
     while (delay < 12.0) : (delay += 0.37) {
-        try std.testing.expectApproxEqRel(expectedCubic(count, delay), delay_line.getOne(delay), tolerance);
+        try std.testing.expectApproxEqRel(expectedCubic(count, delay), delay_line.getOne(delay), 4e-7);
     }
 }
 
@@ -189,7 +177,7 @@ test "constant signal is constant at any fractional delay" {
 
     var delay: f32 = 0.0;
     while (delay < 10.0) : (delay += 0.13) {
-        try std.testing.expectApproxEqAbs(0.75, delay_line.getOne(delay), tolerance);
+        try std.testing.expectApproxEqAbs(0.75, delay_line.getOne(delay), 4e-7);
     }
 }
 
@@ -202,7 +190,7 @@ test "correct after buffer wraps around" {
         pushOne(&delay_line, cubicSignal(@floatFromInt(index)));
         if (index < 12) continue;
         for ([_]f32{ 0.0, 0.5, 1.25, 3.9, 7.5 }) |delay| {
-            try std.testing.expectApproxEqRel(expectedCubic(index + 1, delay), delay_line.getOne(delay), tolerance);
+            try std.testing.expectApproxEqRel(expectedCubic(index + 1, delay), delay_line.getOne(delay), 4e-7);
         }
     }
 }
@@ -241,8 +229,8 @@ test "vector get matches scalar get per lane" {
 
     const result: [simd.len]f32 = delay_line.getVec(delays);
     for (result, lane_delays) |actual, delay| {
-        try std.testing.expectApproxEqRel(delay_line.getOne(delay), actual, tolerance);
-        try std.testing.expectApproxEqRel(expectedCubic(count, delay), actual, tolerance);
+        try std.testing.expectApproxEqRel(delay_line.getOne(delay), actual, 4e-7);
+        try std.testing.expectApproxEqRel(expectedCubic(count, delay), actual, 4e-7);
     }
 }
 
@@ -255,7 +243,7 @@ test "get dispatches on scalar and vector types" {
     try std.testing.expectEqual(delay_line.getOne(2.5), scalar);
 
     const vector: Vec = delay_line.get(@as(Vec, @splat(2.5)));
-    for (@as([simd.len]f32, vector)) |lane| try std.testing.expectApproxEqAbs(scalar, lane, tolerance);
+    for (@as([simd.len]f32, vector)) |lane| try std.testing.expectApproxEqAbs(scalar, lane, 4e-7);
 }
 
 test "empty delay line returns silence" {
@@ -263,4 +251,24 @@ test "empty delay line returns silence" {
     defer delay_line.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(f32, 0.0), delay_line.getOne(3.7));
+}
+
+fn pushOne(delay_line: *Delay, value: f32) void {
+    var buffer = [1]f32{value};
+    delay_line.push(&buffer);
+}
+
+fn cubicSignal(index: f64) f32 {
+    const x = index * 0.1;
+    const result: f64 = 0.5 + 0.8 * x - 0.3 * x * x + 0.05 * x * x * x;
+    return @floatCast(result);
+}
+
+fn pushCubicSignal(delay_line: *Delay, count: usize) void {
+    for (0..count) |index| pushOne(delay_line, cubicSignal(@floatFromInt(index)));
+}
+
+fn expectedCubic(count: usize, delay: f32) f32 {
+    const newest: f64 = @floatFromInt(count - 1);
+    return cubicSignal(newest - delay - 1);
 }
