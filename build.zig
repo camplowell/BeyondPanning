@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const bench = b.step("bench", "Run benchmark");
     var ctx: Context = .{
         .b = b,
         .test_step = b.step("test", "Run unit tests"),
@@ -15,7 +16,9 @@ pub fn build(b: *std.Build) void {
         .native = b.resolveTargetQuery(.{}),
     };
     ctx.addTestRoot(b.path("src/Delay.zig"));
-    _ = ctx.addExeRoot("benchDelay", b.path("src/bench_delay.zig"));
+    const bench_delay_exe = ctx.addExeRoot("benchDelay", b.path("src/bench_delay.zig"));
+    const run_bench_delay = b.addRunArtifact(bench_delay_exe);
+    bench.dependOn(&run_bench_delay.step);
 }
 
 const Context = struct {

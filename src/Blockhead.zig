@@ -1,3 +1,5 @@
+//! Not pulled into the build yet.
+
 const std = @import("std");
 const Delay = @import("Delay.zig");
 const Blockhead = @This();
