@@ -1,0 +1,7 @@
+.{
+    .name = .BeyondPanning,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.17.0",
+    .paths = .{""},
+    .fingerprint = 0x75ff80afa5fa67d7,
+}
