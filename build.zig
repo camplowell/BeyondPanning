@@ -17,7 +17,9 @@ pub fn build(b: *Build) void {
         .test_step = b.step("test", "Run unit tests"),
     };
     self.addTests(b.path("src/Delay.zig"));
+    self.addTests(b.path("src/Blockhead.zig"));
     self.addBench("benchDelay", b.path("src/delay_bench.zig"));
+    self.addBench("benchBlockhead", b.path("src/blockhead_bench.zig"));
 }
 
 fn addExe(self: *Cfg, name: []const u8, root: Build.LazyPath) *Build.Step.Compile {
