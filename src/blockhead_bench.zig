@@ -11,7 +11,8 @@ pub fn main(init: std.process.Init) !void {
     var ctx: Ctx = try .init(init.gpa);
     defer ctx.deinit(init.gpa);
 
-    try bench.run("Filter", &ctx, runFilter);
+    try bench.run("Moving", &ctx, runFilter);
+    try bench.run("Static", &ctx, runStatic);
 
     var io_buf: [1024]u8 = undefined;
     var stdout_writer = stdout.writer(init.io, &io_buf);
@@ -20,9 +21,14 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn runFilter(ctx: *Ctx) void {
-    ctx.filter.target = ctx.params[if (ctx.flip) @as(usize, 1) else @as(usize, 0)];
-    ctx.flip = !ctx.flip;
-    ctx.filter.process(&ctx.workload.input, .{ &ctx.workload.output[0], &ctx.workload.output[1] });
+    ctx.filter.target = ctx.params[if (ctx.flip == 0) @as(usize, 1) else @as(usize, 0)];
+    ctx.flip = (ctx.flip + 1) & 3;
+    ctx.filter.process(&ctx.workload.input, &.{ &ctx.workload.output[0], &ctx.workload.output[1] });
+    std.mem.doNotOptimizeAway(ctx.workload.output);
+}
+
+fn runStatic(ctx: *Ctx) void {
+    ctx.filter.process(&ctx.workload.input, &.{ &ctx.workload.output[0], &ctx.workload.output[1] });
     std.mem.doNotOptimizeAway(ctx.workload.output);
 }
 
@@ -31,7 +37,7 @@ const Ctx = struct {
     listener: Blockhead,
     filter: Blockhead.Filter,
     params: [2]Blockhead.Params,
-    flip: bool,
+    flip: u8,
 
     fn init(gpa: std.mem.Allocator) !Ctx {
         var self: Ctx = undefined;
@@ -39,7 +45,7 @@ const Ctx = struct {
         errdefer self.workload.deinit(gpa);
         self.listener = .init(48000, 0.087, 0.03);
         self.filter = try .init(gpa, Workload.batch_size, self.listener, .{0, 1, 0});
-        self.flip = false;
+        self.flip = 1;
         self.params[0] = .init(self.listener, .{1, 0, 0});
         self.params[1] = self.filter.params;
         return self;

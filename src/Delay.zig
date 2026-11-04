@@ -53,17 +53,17 @@ pub fn push(noalias self: *Delay, noalias values: []const f32) void {
     self.i = (self.i + values.len) & self.mask;
 }
 
-//
-// /// Retrieve a scalar or vector of elements from the delay, relative to the most recently added value.
-// ///
-// /// Expects either f32 or an auto-sized vector of f32.
-// pub fn get(self: Delay, delay: anytype) @TypeOf(delay) {
-//     return switch (@typeInfo(@TypeOf(delay))) {
-//         .vector, .array => self.getVec(delay),
-//         .float => self.getOne(delay),
-//         else => @compileError("Expected a float or simd-sized vector!"),
-//     };
-// }
+
+/// Retrieve a scalar or vector of elements from the delay, relative to the most recently added value.
+///
+/// Expects either f32 or an auto-sized vector of f32.
+pub fn get(self: Delay, start: usize, delay: anytype) @TypeOf(delay) {
+    return switch (@typeInfo(@TypeOf(delay))) {
+        .vector, .array => self.getVec(start, delay),
+        .float => self.getOne(start, delay),
+        else => @compileError("Expected a float or simd-sized vector!"),
+    };
+}
 
 /// Retrieve a vector of consecutive output samples.
 ///
@@ -84,8 +84,8 @@ pub fn getVec(self: Delay, start: usize, delay: Vec) Vec {
         inline for (0..filter_taps) |j| tmp[j] = self.data[base + j ..][0..simd.len].*;
         break :fast tmp;
     } else slow: {
-        const newest_minus_taps: u32 = @truncate(self.i -% filter_taps);
-        const slots: [simd.len]u32 = (simd.splat(UVec, newest_minus_taps) +
+        const newest_minus_taps: u32 = @as(u32, @truncate(self.i)) -% filter_taps;
+        const slots: [simd.len]u32 = (simd.splat(UVec, newest_minus_taps) +%
             simd.iota(UVec) -%
             aligned_floor) & simd.splat(UVec, self.mask);
         var rows: [simd.len * filter_taps]f32 = undefined;

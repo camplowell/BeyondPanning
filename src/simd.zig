@@ -27,9 +27,10 @@ pub fn mulAdd(T: type, a: T, b: T, c: T) T {
         if (cpu.arch.isX86()) break :D cpu.has(.x86, .fma);
         if (cpu.arch.isAarch64()) break :D cpu.has(.aarch64, .neon);
         if (cpu.arch.isRiscv()) break :D cpu.has(.arm, .neon) and cpu.has(.arm, .vfp4);
-        if (cpu.arch.isWasm()) break :D cpu.hasAll(.wasm, &.{ .simd128, .relaxed_simd });
         if (cpu.arch.isPowerPC()) break :D cpu.has(.powerpc, .vsx);
         if (cpu.arch == .s390x) break :D cpu.has(.s390x, .vector);
+        // wasm seems to not lower to vector ops, even when relaxed_simd is present
+        // if (cpu.arch.isWasm()) break :D cpu.hasAll(.wasm, &.{ .simd128, .relaxed_simd });
         break :D false;
     };
     return switch (@typeInfo(T)) {
@@ -53,4 +54,67 @@ pub fn iota(T: type) T {
         .float, .int => return 0,
         else => @compileError("Unsupported target for iota")
     }
+}
+
+pub fn length(T: type) comptime_int {
+    return switch (@typeInfo(T)) {
+        .vector => |v| v.len,
+        .array => |a| a.len,
+        else => 1,
+    };
+}
+
+pub fn ScalarOf(T: type) type {
+    return switch (@typeInfo(T)) {
+        .vector => |v| v.child,
+        .array => |a| a.child,
+        .pointer => |s| s.child,
+        else => T,
+    };
+}
+
+pub fn last(x: anytype) ScalarOf(@TypeOf(x)) {
+    return switch (@typeInfo(@TypeOf(x))) {
+        .vector => |v| x[v.len - 1],
+        .array, .pointer => x[x.len - 1],
+        else => x,
+    };
+}
+
+pub fn Decay(V: type) type {
+    const v = switch (@typeInfo(V)) {
+        .vector => |v| v,
+        else => @compileError("Expected a vector type"),
+    };
+    const steps = comptime std.math.log2_int(usize, v.len);
+    const Float = v.child;
+    return struct {
+        const Self = @This();
+        linear_fac: [length(V)]Float,
+        
+        pub fn init(decay: Float) Self {
+            var self: Self = undefined;
+            var decay_pow: Float = decay;
+            inline for (0..self.linear_fac.len) |i| {
+                self.linear_fac[i] = decay_pow;
+                decay_pow *= decay;
+            }
+            return self;
+        }
+        
+        pub fn nextVec(self: Self, x: V, y_prev: Float) V {
+            var acc = x;
+            inline for (0..steps) |iter| {
+                const stride = 1 << iter;
+                const shifted = std.simd.shiftElementsRight(acc, stride, 0);
+                acc = mulAdd(V, shifted, @splat(self.linear_fac[stride - 1]), acc);
+            }
+            acc = mulAdd(V, self.linear_fac, @splat(y_prev), acc);
+            return acc;
+        }
+
+        pub fn nextScalar(self: Self, x: Float, y_prev: Float) Float {
+            return @mulAdd(Float, self.linear_fac[0], y_prev, x);
+        }
+    };
 }
