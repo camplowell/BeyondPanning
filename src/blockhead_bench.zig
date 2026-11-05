@@ -1,23 +1,23 @@
 const std = @import("std");
 const simd = @import("simd.zig");
-const Benchmark = @import("Benchmark.zig");
+const benchmark = @import("bench_runner.zig");
 const Blockhead = @import("Blockhead.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const stdout: std.Io.File = .stdout();
-    var bench: Benchmark = .{ .gpa = init.gpa, .io = init.io };
-    defer bench.deinit();
-
     var ctx: Ctx = try .init(init.gpa);
     defer ctx.deinit(init.gpa);
-
-    try bench.run("Moving", &ctx, runFilter);
-    try bench.run("Static", &ctx, runStatic);
-
+    
     var io_buf: [1024]u8 = undefined;
-    var stdout_writer = stdout.writer(init.io, &io_buf);
-    try stdout_writer.interface.print("{f}", .{bench});
-    try stdout_writer.flush();
+    var stdout = std.Io.File.stdout().writer(init.io, &io_buf);
+
+    try benchmark.runAll(
+        init.io, 
+        &stdout.interface,
+        &.{
+            .init("Moving", &ctx, runFilter, .{}),
+            .init("Static", &ctx, runStatic, .{}),
+        }
+    );
 }
 
 fn runFilter(ctx: *Ctx) void {

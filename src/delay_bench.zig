@@ -1,26 +1,26 @@
 const std = @import("std");
 const simd = @import("simd.zig");
-const Benchmark = @import("Benchmark.zig");
+const runner = @import("bench_runner.zig");
 const Delay = @import("Delay.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const stdout: std.Io.File = .stdout();
-    var bench: Benchmark = .{ .gpa = init.gpa, .io = init.io };
-
-    defer bench.deinit();
     var delay: Delay = try .init(init.gpa, 256);
     defer delay.deinit(init.gpa);
     const ctx: Ctx = .{ .delay = &delay, .workload = .init() };
     ctx.delay.push(&ctx.workload.input);
-
-    try bench.run("Push only", &ctx, pushOnly);
-    try bench.run("Push + getVec", &ctx, pushAndGetVec);
-    try bench.run("Push + getOne", &ctx, pushAndGetOne);
-
+    
+    const stdout_file: std.Io.File = .stdout();
     var io_buf: [1024]u8 = undefined;
-    var stdout_writer = stdout.writer(init.io, &io_buf);
-    try stdout_writer.interface.print("{f}", .{bench});
-    try stdout_writer.flush();
+    var stdout = stdout_file.writer(init.io, &io_buf);
+    try runner.runAll(
+        init.io, 
+        &stdout.interface,
+        &.{
+            .init("Push only", &ctx, pushOnly, .{}),
+            .init("Push & getVec", &ctx, pushAndGetVec, .{}),
+            .init("Push & getOne", &ctx, pushAndGetOne, .{}),
+        }
+    );
 }
 
 fn pushOnly(ctx: *const Ctx) void {
