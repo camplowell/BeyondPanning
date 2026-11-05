@@ -51,12 +51,12 @@ pub const Task = struct {
 };
 
 fn printHeader(writer: *std.Io.Writer, tasks: []const Task) std.Io.Writer.Error!usize {
-    const name_col_width = D: {
+    const name_col_width = @max(D: {
         var v: usize = 0;
         for (tasks) |task| v = @max(v, task.name.len);
         break :D v;
-    } + 4;
-    try writer.alignBuffer("Task", name_col_width, .left, ' ');
+    } + 1, 5);
+    try writer.alignBuffer("Task", name_col_width, .center, ' ');
     const header_size = try Result.header(writer);
     try writer.splatByteAll('-', name_col_width + header_size);
     try writer.writeByte('\n');
