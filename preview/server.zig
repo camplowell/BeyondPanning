@@ -14,9 +14,9 @@ pub fn main(init: std.process.Init) !void {
     defer listener.deinit(io);
 
     std.log.info("Listening at http://{f}/\n", .{ addr });
-    // for (pages) |page| {
-    //     std.log.debug("{s} ({s}) @ {s}", .{page.target, page.content_type, page.path});
-    // }
+    for (pages) |page| {
+        std.log.debug("{s} ({s}) @ {s}", .{page.target, page.content_type, page.path});
+    }
     while (true) {
         const stream = try listener.accept(io);
         const thread = std.Thread.spawn(.{}, serve, .{ gpa, io, stream }) catch |err| {
@@ -49,7 +49,7 @@ fn serve(gpa: std.mem.Allocator, io: std.Io, stream: net.Stream) !void {
 }
 
 fn respond(gpa: std.mem.Allocator, io: std.Io, request: *std.http.Server.Request) !void {
-    const target = std.mem.trim(u8, request.head.target, "/");
+    const target = std.mem.trimStart(u8, request.head.target, "/");
     if (target.len == 0) {
         try request.respond(homepage_contents, .{
             .extra_headers = &.{

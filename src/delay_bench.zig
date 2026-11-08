@@ -6,7 +6,7 @@ const Delay = @import("Delay.zig");
 pub fn main(init: std.process.Init) !void {
     var delay: Delay = try .init(init.gpa, 256);
     defer delay.deinit(init.gpa);
-    const ctx: Ctx = .{ .delay = &delay, .workload = .init() };
+    var ctx: Ctx = .{ .delay = &delay, .workload = .init() };
     ctx.delay.push(&ctx.workload.input);
     
     const stdout_file: std.Io.File = .stdout();
