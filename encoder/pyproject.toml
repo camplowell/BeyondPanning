@@ -1,13 +1,29 @@
 [project]
 name = "encoder"
 version = "0.1.0"
-description = "Add your description here"
+description = "Encodes .sofa files into the .bptf format"
 readme = "README.md"
 authors = [
     { name = "Lowell Camp", email = "camplowell@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "cyclopts>=5.3.3",
+    "jax>=0.12.0",
+    "optax>=0.2.8",
+    "scipy>=1.18.1",
+    "sofar>=1.3.0",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda13]>=0.12.0"]
+rocm = [
+    "jax-rocm7-pjrt>=0.12.0",
+    "jax>=0.12.0",
+    "jax-rocm7-plugin>=0.12.0",
+]
+oneapi = ["jax[oneapi]>=0.12.0"]
+tpu = ["jax[tpu]>=0.12.0"]
 
 [project.scripts]
 encoder = "encoder:main"
@@ -15,3 +31,13 @@ encoder = "encoder:main"
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cuda" },
+        { extra = "rocm" },
+        { extra = "oneapi" },
+        { extra = "tpu" },
+    ],
+]
