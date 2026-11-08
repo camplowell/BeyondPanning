@@ -1,4 +1,5 @@
 [tools]
+pnpm = "12.18"
 wasmtime = "latest"
 zig = "0.17"
 zls = "0.17"

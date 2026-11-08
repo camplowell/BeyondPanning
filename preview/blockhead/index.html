@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+    <div class="row">
+        <button id="playPause">Play</button>
+        <label>Source audio: <input type="file" id="audioSelect" accept="audio/*,.opus,.ogg,.mp3,.wav,.m4a,.flac"></label>
+    </div>
+    <div class="row">
+        <label>Azimuth: <input type="range" id="azimuth" min="-3.1415" max="3.1415" step="0.01"></label>
+        <span id="azDisp">0&deg;</span>
+    </div>
+    <div class="row">
+        <label>Elevation: <input type="range" id="elevation" min="-1.5708" max="1.5708" step="0.01"></label>
+        <span id="elDisp">0&deg;</span>
+    </div>
+    <script type="module">
+        class BlockheadPanner extends AudioWorkletNode {
+            constructor(ctx, module) {
+                super(ctx, 'blockhead-panner', {
+                    numberOfInputs: 1,
+                    numberOfOutputs: 1,
+                    outputChannelCount: [2],
+                    channelCount: 1,
+                    channelCountMode: 'explicit',
+                    processorOptions: { module },
+                    parameterData: { x: -1, y: 0, z: 0 },
+                });
+            }
+        }
+
+        function toMono(buf) {
+            if (buf.numberOfChannels === 1) return buf;
+            const n = buf.length;
+            const mono = ctx.createBuffer(1, n, buf.sampleRate);
+            const out = mono.getChannelData(0);
+            const chans = [];
+            for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+            for (let i = 0; i < n; i++) {
+                let s = 0;
+                for (let c = 0; c < chans.length; c++) s += chans[c][i];
+                out[i] = s / chans.length;
+            }
+            return mono;
+        }
+        
+        let ctx, src, head;
+        async function swapSrc(buf) {
+            if (src) { src.stop(); src.disconnect(); }
+            src = ctx.createBufferSource();
+            src.buffer = toMono(buf);
+            src.loop = true;
+            src.connect(head).connect(ctx.destination);
+            src.start();
+        }
+
+        const azIn = document.getElementById('azimuth');
+        const azDisp = document.getElementById('azDisp');
+        const elIn = document.getElementById('elevation');
+        const elDisp = document.getElementById('elDisp');
+        function updateDirection() {
+            const az = parseFloat(azIn.value);
+            const el = parseFloat(elIn.value);
+            if (head) {
+                const cos_el = Math.cos(el);
+                head.parameters.get('x').value = cos_el * Math.cos(az);
+                head.parameters.get('y').value = -cos_el * Math.sin(az);
+                head.parameters.get('z').value = Math.sin(el);
+            }
+            azDisp.textContent = `${Math.round(az * 180 / Math.PI)}°`;
+            elDisp.textContent = `${Math.round(el * 180 / Math.PI)}°`;
+        }
+        azIn.oninput = updateDirection;
+        elIn.oninput = updateDirection;
+
+        let default_audio = fetch('/anton__sewing-machine-gritty-loop.opus').then((r) => r.arrayBuffer());
+        document.getElementById('audioSelect').onchange = async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            try {
+            const promise = file.arrayBuffer().then((b) => ctx.decodeAudioData(b));
+            if (ctx) swapSrc(await promise);
+                else default_audio = promise;
+            } catch (err) {
+                console.error("Failed to load audio file: ", err);
+                alert("Could not load audio file (see console)");
+            }
+        };
+        
+        let wasm = WebAssembly.compileStreaming(fetch('/blockhead/worker.wasm'));
+        const btn = document.getElementById('playPause');
+        btn.onclick = async () => {
+            try {
+                if (ctx === undefined) {
+                    ctx = new AudioContext();
+                    await ctx.resume();
+                    
+                    await ctx.audioWorklet.addModule('/blockhead/worker.js');
+                    head = new BlockheadPanner(ctx, await wasm);
+                    updateDirection();
+    
+                    const buf = await default_audio.then((b) => ctx.decodeAudioData(b));
+                    swapSrc(buf);
+                    btn.textContent = 'Pause';
+                } else if (ctx.state === 'running') {
+                    await ctx.suspend();
+                    btn.textContent = 'Play';
+                } else {
+                    await ctx.resume();
+                    btn.textContent = 'Pause';
+                }
+            } catch (err) {
+                console.error('Failed to start audio:', err);
+                alert('Could not start audio: ' + err.message);
+                ctx = head = src = undefined;
+            }
+        }
+
+    </script>
+</body>

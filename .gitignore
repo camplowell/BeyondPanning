@@ -1,2 +1,15 @@
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+
+*.so
+bulid/
+dist/
+*.egg-info
+
+.venv
+
+# Zig
 zig-out
 .zig-cache
